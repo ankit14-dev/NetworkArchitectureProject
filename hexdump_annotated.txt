@@ -1,0 +1,160 @@
+================================================================================
+                    B-HTTP/1.0 PROTOCOL ANNOTATED HEXDUMP
+================================================================================
+Transaction: Client requests "GET /hello.txt", Server responds "200 OK" (70 bytes body).
+Transport: Persistent TCP connection.
+Framing Architecture: 9-byte fixed header (24-bit Length, 8-bit Type, 8-bit Flags, 31-bit Stream ID).
+Header Compression: 1-byte Static Table index / length-prefixed literals (HPACK mechanism).
+
+================================================================================
+1. REQUEST FRAME (Client -> Server)
+================================================================================
+Frame Type: HEADERS (0x01)
+Length: 55 bytes (0x000037)
+Flags: 0x01 (END_STREAM)
+Stream ID: 1 (0x00000001)
+Total Frame Size on Wire: 64 bytes (9 bytes header + 55 bytes payload)
+
+Raw Hexdump:
+00000000  00 00 37 01 01 00 00 00  01 05 81 00 03 47 45 54  |..7..........GET|
+00000010  82 00 0a 2f 68 65 6c 6c  6f 2e 74 78 74 87 00 0e  |.../hello.txt...|
+00000020  6c 6f 63 61 6c 68 6f 73  74 3a 39 30 30 30 86 00  |localhost:9000..|
+00000030  09 62 63 75 72 6c 2f 31  2e 30 88 00 03 2a 2f 2a  |.bcurl/1.0...*/*|
+
+Byte-by-Byte Structural Breakdown:
+Offset  Hex Value               Field Interpretation & Meaning
+--------------------------------------------------------------------------------
+00..02  00 00 37                Payload Length = 55 bytes (24-bit big-endian unsigned integer)
+03      01                      Frame Type = 0x01 (HEADERS)
+04      01                      Flags = 0x01 (FLAG_END_STREAM: request contains no body/DATA frames)
+05..08  00 00 00 01             Reserved Bit (0) + Stream Identifier = 1 (Client request stream)
+----------------- PAYLOAD START (Length: 55 bytes, 5 headers) ------------------
+09      05                      NumHeaders = 5 header entries in this block
+
+-- Header 1: :method = GET --
+0A      81                      Name Identifier: bit 7 = 1 (Indexed), Index = 1 (":method")
+0B..0C  00 03                   Value Length = 3 bytes (16-bit big-endian unsigned integer)
+0D..0F  47 45 54                Value = "GET" (ASCII string)
+
+-- Header 2: :path = /hello.txt --
+10      82                      Name Identifier: bit 7 = 1 (Indexed), Index = 2 (":path")
+11..12  00 0a                   Value Length = 10 bytes
+13..1C  2f 68 65 6c 6c 6f 2e    Value = "/hello.txt" (ASCII string)
+        74 78 74
+
+-- Header 3: host = localhost:9000 --
+1D      87                      Name Identifier: bit 7 = 1 (Indexed), Index = 7 ("host")
+1E..1F  00 0e                   Value Length = 14 bytes
+20..2D  6c 6f 63 61 6c 68 6f    Value = "localhost:9000" (ASCII string)
+        73 74 3a 39 30 30 30
+
+-- Header 4: user-agent = bcurl/1.0 --
+2E      86                      Name Identifier: bit 7 = 1 (Indexed), Index = 6 ("user-agent")
+2F..30  00 09                   Value Length = 9 bytes
+31..39  62 63 75 72 6c 2f 31    Value = "bcurl/1.0" (ASCII string)
+        2e 30
+
+-- Header 5: accept = */* --
+3A      88                      Name Identifier: bit 7 = 1 (Indexed), Index = 8 ("accept")
+3B..3C  00 03                   Value Length = 3 bytes
+3D..3F  2a 2f 2a                Value = "*/*" (ASCII string)
+----------------- PAYLOAD END --------------------------------------------------
+
+
+================================================================================
+2. RESPONSE HEADERS FRAME (Server -> Client)
+================================================================================
+Frame Type: HEADERS (0x01)
+Length: 85 bytes (0x000055)
+Flags: 0x00 (No flags; DATA frame follows)
+Stream ID: 1 (0x00000001)
+Total Frame Size on Wire: 94 bytes (9 bytes header + 85 bytes payload)
+
+Raw Hexdump:
+00000000  00 00 55 01 00 00 00 00  01 05 83 00 03 32 30 30  |..U..........200|
+00000010  89 00 0a 62 73 65 72 76  65 2f 31 2e 30 8a 00 1d  |...bserve/1.0...|
+00000020  53 61 74 2c 20 32 36 20  53 65 70 20 32 30 32 36  |Sat, 26 Sep 2026|
+00000030  20 30 30 3a 30 30 3a 30  30 20 47 4d 54 85 00 02  | 00:00:00 GMT...|
+00000040  36 39 84 00 19 74 65 78  74 2f 70 6c 61 69 6e 3b  |69...text/plain;|
+00000050  20 63 68 61 72 73 65 74  3d 75 74 66 2d 38        | charset=utf-8|
+
+Byte-by-Byte Structural Breakdown:
+Offset  Hex Value               Field Interpretation & Meaning
+--------------------------------------------------------------------------------
+00..02  00 00 55                Payload Length = 85 bytes (24-bit big-endian unsigned integer)
+03      01                      Frame Type = 0x01 (HEADERS)
+04      00                      Flags = 0x00 (Not END_STREAM; response body will follow in DATA frame)
+05..08  00 00 00 01             Reserved Bit (0) + Stream Identifier = 1 (matching request Stream ID)
+----------------- PAYLOAD START (Length: 85 bytes, 5 headers) ------------------
+09      05                      NumHeaders = 5 header entries
+
+-- Header 1: :status = 200 --
+0A      83                      Name Identifier: bit 7 = 1 (Indexed), Index = 3 (":status")
+0B..0C  00 03                   Value Length = 3 bytes
+0D..0F  32 30 30                Value = "200" (ASCII string)
+
+-- Header 2: server = bserve/1.0 --
+10      89                      Name Identifier: bit 7 = 1 (Indexed), Index = 9 ("server")
+11..12  00 0a                   Value Length = 10 bytes
+13..1C  62 73 65 72 76 65 2f 31  Value = "bserve/1.0" (ASCII string)
+        2e 30
+
+-- Header 3: date = Sat, 26 Sep 2026 00:00:00 GMT --
+1D      8a                      Name Identifier: bit 7 = 1 (Indexed), Index = 10 ("date")
+1E..1F  00 1d                   Value Length = 29 bytes
+20..3C  53 61 74 2c 20 ... 47   Value = "Sat, 26 Sep 2026 00:00:00 GMT" (RFC 7231 IMF-fixdate)
+        4d 54
+
+-- Header 4: content-length = 70 --
+3D      85                      Name Identifier: bit 7 = 1 (Indexed), Index = 5 ("content-length")
+3E..3F  00 02                   Value Length = 2 bytes
+40..41  37 30                   Value = "70" (ASCII string)
+
+-- Header 5: content-type = text/plain; charset=utf-8 --
+42      84                      Name Identifier: bit 7 = 1 (Indexed), Index = 4 ("content-type")
+43..44  00 19                   Value Length = 25 bytes
+45..5D  74 65 78 74 2f 70 6c 61  Value = "text/plain; charset=utf-8" (MIME type string)
+        69 6e 3b 20 63 68 61 72
+        73 65 74 3d 75 74 66 2d
+        38
+----------------- PAYLOAD END --------------------------------------------------
+
+
+================================================================================
+3. RESPONSE DATA FRAME (Server -> Client)
+================================================================================
+Frame Type: DATA (0x00)
+Length: 70 bytes (0x000046)
+Flags: 0x01 (FLAG_END_STREAM)
+Stream ID: 1 (0x00000001)
+Total Frame Size on Wire: 79 bytes (9 bytes header + 70 bytes payload)
+
+Raw Hexdump:
+00000000  00 00 46 00 01 00 00 00  01 48 65 6c 6c 6f 2c 20  |..F......Hello, |
+00000010  62 69 6e 61 72 79 20 48  54 54 50 20 77 6f 72 6c  |binary HTTP worl|
+00000020  64 21 0a 54 68 69 73 20  69 73 20 61 20 70 6c 61  |d!.This is a pla|
+00000030  69 6e 20 74 65 78 74 20  66 69 6c 65 20 73 65 72  |in text file ser|
+00000040  76 65 64 20 62 79 20 62  73 65 72 76 65 2e 0a     |ved by bserve..|
+
+Byte-by-Byte Structural Breakdown:
+Offset  Hex Value               Field Interpretation & Meaning
+--------------------------------------------------------------------------------
+00..02  00 00 46                Payload Length = 70 bytes (24-bit big-endian integer)
+03      00                      Frame Type = 0x00 (DATA)
+04      01                      Flags = 0x01 (FLAG_END_STREAM: terminates response on Stream 1)
+05..08  00 00 00 01             Reserved Bit (0) + Stream Identifier = 1
+----------------- PAYLOAD START (Length: 70 bytes) -----------------------------
+09..4E  48 65 6c 6c 6f 2c 20 62  Application Payload Body:
+        69 6e 61 72 79 20 48 54  "Hello, binary HTTP world!\nThis is a plain text file served by bserve.\n"
+        54 50 20 77 6f 72 6c 64  (Exact 70 bytes matching content-length header)
+        21 0a 54 68 69 73 20 69
+        73 20 61 20 70 6c 61 69
+        6e 20 74 65 78 74 20 66
+        69 6c 65 20 73 65 72 76
+        65 64 20 62 79 20 62 73
+        65 72 76 65 2e 0a
+----------------- PAYLOAD END --------------------------------------------------
+
+Connection Status after Frame:
+- Stream 1 state: CLOSED (both request and response sent END_STREAM).
+- TCP Connection state: OPEN (kept alive for subsequent requests).

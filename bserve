@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""
+bserve - Binary HTTP Server
+Usage: ./bserve <root_dir> <port>
+"""
+
+import email.utils
+import mimetypes
+import os
+import socket
+import sys
+import threading
+from pathlib import Path
+from typing import Optional, Tuple
+
+import bprotocol
+
+
+def format_http_date() -> str:
+    return email.utils.formatdate(timeval=None, localtime=False, usegmt=True)
+
+
+def send_response(sock: socket.socket, stream_id: int, status_code: int,
+                  headers_extra: list, body: bytes) -> None:
+    """
+    Sends a HEADERS frame followed by a DATA frame with FLAG_END_STREAM.
+    """
+    resp_headers = [
+        (":status", str(status_code)),
+        ("server", "bserve/1.0"),
+        ("date", format_http_date()),
+        ("content-length", str(len(body))),
+    ]
+    resp_headers.extend(headers_extra)
+
+    hdr_payload = bprotocol.encode_headers(resp_headers)
+    # HEADERS frame (Flags: 0x00)
+    hdr_frame = bprotocol.pack_frame(
+        bprotocol.FRAME_HEADERS,
+        bprotocol.FLAG_NONE,
+        stream_id,
+        hdr_payload
+    )
+    sock.sendall(hdr_frame)
+
+    # DATA frame (Flags: FLAG_END_STREAM)
+    data_frame = bprotocol.pack_frame(
+        bprotocol.FRAME_DATA,
+        bprotocol.FLAG_END_STREAM,
+        stream_id,
+        body
+    )
+    sock.sendall(data_frame)
+
+
+def resolve_file_path(docroot: Path, req_path: str) -> Tuple[Optional[Path], bool]:
+    """
+    Resolves req_path relative to docroot.
+    Returns (resolved_path, is_valid_syntax).
+    If path traverses outside docroot, returns (None, False).
+    """
+    # Strip URL parameters or fragments if any
+    clean_path = req_path.split("?", 1)[0].split("#", 1)[0]
+    # Remove leading slashes for relative joining
+    rel_path = clean_path.lstrip("/")
+    if not rel_path:
+        rel_path = "index.html"
+
+    # Detect traversal attempts
+    try:
+        candidate = (docroot / rel_path).resolve()
+        # Verify candidate is within docroot
+        docroot_resolved = docroot.resolve()
+        if not str(candidate).startswith(str(docroot_resolved)):
+            return None, False
+        if candidate.is_dir():
+            index_candidate = (candidate / "index.html").resolve()
+            if str(index_candidate).startswith(str(docroot_resolved)):
+                candidate = index_candidate
+            else:
+                return None, False
+        return candidate, True
+    except Exception:
+        return None, False
+
+
+def handle_client(sock: socket.socket, addr: Tuple[str, int], docroot: Path) -> None:
+    sock.settimeout(60.0)  # 60s idle timeout for keep-alive
+    try:
+        while True:
+            try:
+                frame_info = bprotocol.read_frame(sock)
+            except bprotocol.ProtocolError as e:
+                # Malformed frame: send 400 Bad Request and close desynchronized connection
+                try:
+                    send_response(
+                        sock, 0, 400,
+                        [("content-type", "text/plain; charset=utf-8")],
+                        f"400 Bad Request: Malformed frame ({e})\n".encode("utf-8")
+                    )
+                except Exception:
+                    pass
+                break
+            except socket.timeout:
+                break
+            except (ConnectionResetError, BrokenPipeError):
+                break
+
+            if frame_info is None:
+                # Clean client close
+                break
+
+            frame_type, flags, stream_id, payload, _ = frame_info
+
+            # Forward compatibility rule:
+            # "A receiver meeting a frame type it does not know MUST skip it cleanly."
+            if frame_type not in (bprotocol.FRAME_DATA, bprotocol.FRAME_HEADERS, bprotocol.FRAME_GOAWAY):
+                # Cleanly skip unknown frame; continue reading next frame
+                continue
+
+            if frame_type == bprotocol.FRAME_GOAWAY:
+                break
+
+            if frame_type == bprotocol.FRAME_DATA:
+                # Standalone data frame outside active request
+                continue
+
+            if frame_type == bprotocol.FRAME_HEADERS:
+                try:
+                    headers = bprotocol.decode_headers(payload)
+                except bprotocol.ProtocolError as e:
+                    send_response(
+                        sock, stream_id, 400,
+                        [("content-type", "text/plain; charset=utf-8")],
+                        f"400 Bad Request: Invalid header block ({e})\n".encode("utf-8")
+                    )
+                    continue
+
+                hdr_dict = {name: val for name, val in headers}
+                req_path = hdr_dict.get(":path")
+                method = hdr_dict.get(":method", "GET").upper()
+
+                if not req_path:
+                    send_response(
+                        sock, stream_id, 400,
+                        [("content-type", "text/plain; charset=utf-8")],
+                        b"400 Bad Request: Missing :path header\n"
+                    )
+                    continue
+
+                if method != "GET":
+                    send_response(
+                        sock, stream_id, 400,
+                        [("content-type", "text/plain; charset=utf-8")],
+                        f"400 Bad Request: Unsupported method '{method}'\n".encode("utf-8")
+                    )
+                    continue
+
+                target_file, valid = resolve_file_path(docroot, req_path)
+                if not valid:
+                    send_response(
+                        sock, stream_id, 400,
+                        [("content-type", "text/plain; charset=utf-8")],
+                        b"400 Bad Request: Invalid path\n"
+                    )
+                    continue
+
+                if target_file is None or not target_file.is_file():
+                    send_response(
+                        sock, stream_id, 404,
+                        [("content-type", "text/plain; charset=utf-8")],
+                        b"404 Not Found\n"
+                    )
+                    continue
+
+                # File exists: read and serve
+                try:
+                    with open(target_file, "rb") as f:
+                        file_data = f.read()
+                    mime_type, _ = mimetypes.guess_type(str(target_file))
+                    if not mime_type:
+                        mime_type = "application/octet-stream"
+                    send_response(
+                        sock, stream_id, 200,
+                        [("content-type", mime_type)],
+                        file_data
+                    )
+                except Exception as e:
+                    send_response(
+                        sock, stream_id, 500,
+                        [("content-type", "text/plain; charset=utf-8")],
+                        f"500 Internal Server Error: {e}\n".encode("utf-8")
+                    )
+    finally:
+        sock.close()
+
+
+def main():
+    if len(sys.argv) != 3:
+        print(f"Usage: {sys.argv[0]} <root_dir> <port>", file=sys.stderr)
+        sys.exit(1)
+
+    root_dir = Path(sys.argv[1]).resolve()
+    if not root_dir.is_dir():
+        print(f"Error: Root directory '{root_dir}' does not exist or is not a directory", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        port = int(sys.argv[2])
+    except ValueError:
+        print(f"Error: Invalid port '{sys.argv[2]}'", file=sys.stderr)
+        sys.exit(1)
+
+    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+    try:
+        server_sock.bind(("0.0.0.0", port))
+        server_sock.listen(128)
+        print(f"bserve listening on port {port}, serving '{root_dir}'...", flush=True)
+    except Exception as e:
+        print(f"Error binding to port {port}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        while True:
+            client_sock, client_addr = server_sock.accept()
+            t = threading.Thread(
+                target=handle_client,
+                args=(client_sock, client_addr, root_dir),
+                daemon=True
+            )
+            t.start()
+    except KeyboardInterrupt:
+        print("\nShutting down bserve.")
+    finally:
+        server_sock.close()
+
+
+if __name__ == "__main__":
+    main()

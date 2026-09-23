@@ -1,0 +1,2 @@
+Hello, binary HTTP world!
+This is a plain text file served by bserve.
