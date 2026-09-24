@@ -1,4 +1,27 @@
-# Course Project: HTTP, in Binary (B-HTTP/1.0)
+# Network Architecture Assignments
+
+This repository contains both socket-programming assignments. Each program is
+implemented in Python using the standard library only.
+
+## Assignment 1: Calculator That Stays on the Line
+
+`calcserve` is a small HTTP/1.1 server built directly on a TCP socket. It
+supports `GET /add`, `/sub`, `/mul`, and `/div` with `a` and `b` query
+parameters. It returns the required 400, 404, and 405 responses and keeps the
+same connection open across sequential or pipelined requests.
+
+```bash
+./calcserve                 # listens on 127.0.0.1:8080
+./calcserve 9001            # choose another port
+curl 'http://localhost:8080/add?a=2&b=3'
+python3 test_calculator.py
+```
+
+The parser reads through `\r\n\r\n`, then consumes exactly the number of body
+bytes declared by `Content-Length`. Bytes beyond that boundary remain buffered
+for the next request. This is what makes persistent HTTP/1.1 connections safe.
+
+## Assignment 2: HTTP, in Binary (B-HTTP/1.0)
 
 A lightweight binary application-layer protocol and reference implementation inspired by HTTP/2 framing and HPACK header compression.
 
